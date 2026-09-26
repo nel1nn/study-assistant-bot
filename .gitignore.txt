@@ -1,0 +1,13 @@
+# Секретные конфиги
+config.json
+/config.json
+
+# База данных SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Мусор компиляции Visual Studio
+.vs/
+bin/
+obj/
