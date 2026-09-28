@@ -454,7 +454,6 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
         }
     }
 
-    // Обработка отправки фото для верификации
     if (msg.Photo != null)
     {
         using (ApplicationContext db = new ApplicationContext(options))
@@ -481,51 +480,72 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
 
     if (msg.Document != null)
     {
-        await bot.SendMessage(chatId, "загрузка файла", cancellationToken: ct);
-
         using (ApplicationContext db = new ApplicationContext(options))
         {
-                var teacher = db.Teachers.FirstOrDefault(t => t.TgId == fromUserId);
+            var teacher = db.Teachers.FirstOrDefault(t => t.TgId == fromUserId);
 
-                if (teacher == null)
-                    return;
+            if (teacher == null)
+                return;
 
-                // если файл не txt или docx
-                if( !(msg.Document.FileName.EndsWith(".txt") || msg.Document.FileName.EndsWith(".docx")) )
-                {
-                     await bot.SendMessage(chatId, "Файл такого расширения не поддерживается! Повторите попытку!", cancellationToken: ct);
+            // если файл не txt или docx
+            if ( !(msg.Document.FileName.EndsWith(".txt") || msg.Document.FileName.EndsWith(".docx")) )
+            {
+                 await bot.SendMessage(chatId, "Файл такого расширения не поддерживается! Повторите попытку!", cancellationToken: ct);
 
-                     return;
-                }
+                 return;
+            }
 
-                if(teacher.State == "WaitingForUploadNote")
-                {
-                    TeacherNote note = new TeacherNote();
-                    note.FileId = msg.Document.FileId;
-                    note.TeacherTgId = fromUserId;
-                    note.Discipline = teacher.Specialty;
-                    note.Text = msg.Caption;
-                    note.CreatedTime = DateTime.Now;
-                    note.FileName = msg.Document.FileName;
-                    note.NoteName = teacher.NoteName!;
-                    teacher.State = null;
+            if (teacher.State != null && teacher.State.StartsWith("WaitingSendNewNoteContent:"))
+            {
+                int noteNum = int.Parse(teacher.State.Split(':')[1]);
+                var note = db.teacherNotes.FirstOrDefault(n=>n.Id==noteNum);
+                if (note == null) return;
 
-                    db.teacherNotes.Add(note);
+                note.FileId = msg.Document.FileId;
+                note.Text = msg.Caption;
+                note.CreatedTime = DateTime.Now;
+                note.FileName = msg.Document.FileName;
 
-                    db.SaveChanges();
+                db.SaveChanges();
 
-                    int noteId = note.Id;
-
-                    await bot.SendMessage(chatId, "Обработка загруженного файла... Время ожидания зависит от его содержания, пожалуйста, подождите.", cancellationToken: ct);
-
+                var messageToDelete = await bot.SendMessage(chatId, "Обработка загруженного файла... Время ожидания зависит от его объема, пожалуйста, подождите.", cancellationToken: ct);
 
                 AI aiService = new AI(config);
-                    await aiService.GenerationNote(options, note.Id,bot);
 
-                    await bot.SendMessage(chatId, "Заметка успешно добавлена!", cancellationToken: ct);
+                await aiService.GenerationNote(options, note.Id, bot);
 
-                    return;
-                }
+                await bot.DeleteMessage(chatId, messageToDelete.Id, cancellationToken:ct);
+                await bot.SendMessage(chatId, "Содержание заметки успешно обновлено!", cancellationToken: ct);
+            }
+
+            if (teacher.State == "WaitingForUploadNote")
+            {
+                TeacherNote note = new TeacherNote();
+                note.FileId = msg.Document.FileId;
+                note.TeacherTgId = fromUserId;
+                note.Discipline = teacher.Specialty;
+                note.Text = msg.Caption;
+                note.CreatedTime = DateTime.Now;
+                note.FileName = msg.Document.FileName;
+                note.NoteName = teacher.NoteName!;
+                teacher.State = null;
+
+                db.teacherNotes.Add(note);
+
+                db.SaveChanges();
+
+                int noteId = note.Id;
+
+                await bot.SendMessage(chatId, "Обработка загруженного файла... Время ожидания зависит от его объема, пожалуйста, подождите.", cancellationToken: ct);
+
+                AI aiService = new AI(config);
+
+                await aiService.GenerationNote(options, note.Id,bot);
+
+                await bot.SendMessage(chatId, "Заметка успешно добавлена!", cancellationToken: ct);
+
+                return;
+            }
         }
     }
 }
