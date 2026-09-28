@@ -172,10 +172,20 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
         {
             using (ApplicationContext db = new ApplicationContext(options))
             {
-                bool isAdmin = db.Users.FirstOrDefault(u => u.TgId == fromUserId) is AdminDB;
+                var admin = db.Users.FirstOrDefault(a=>a.TgId == fromUserId);
+
+                bool isAdmin = admin is AdminDB;
+
+                if (admin == null || !isAdmin) return;
 
                 if (isAdmin)
                 {
+                    if (admin.LastInlineMessageId != 0)
+                    {
+                        await bot.DeleteMessage(chatId, admin.LastInlineMessageId, cancellationToken: ct);
+                        admin.State = null;
+                    }
+
                     var inlineAdminKeyboard = (new[]
                     {
                     new[]
@@ -191,12 +201,16 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                         InlineKeyboardButton.WithCallbackData("❌ Отмена", "admin:cancel")
                     }});
 
-                    await bot.SendMessage(
+                    var messageToDelete = await bot.SendMessage(
                     chatId: chatId,
                     text: "Меню",
                     replyMarkup: inlineAdminKeyboard,
                     cancellationToken: ct
-);
+                    );
+
+                    admin.LastInlineMessageId = messageToDelete.Id;
+
+                    db.SaveChanges();
                 }
 
                 else
@@ -351,14 +365,6 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
 
                     user.LastInlineMessageId = message.Id;
                     db.SaveChanges();
-
-                    
-
-
-  
-
-
-
                 }
 
                 if (user.State != null && user.State.StartsWith("WaitingSendNewNoteName:"))
