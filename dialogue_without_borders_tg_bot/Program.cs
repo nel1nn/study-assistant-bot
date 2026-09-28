@@ -279,15 +279,15 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
         {
             using (ApplicationContext db = new ApplicationContext(options))
             {
-                var user = db.Students.FirstOrDefault(u => u.TgId == fromUserId);
+                var student = db.Students.FirstOrDefault(u => u.TgId == fromUserId);
 
-                if (user == null)
+                if (student == null)
                 {
                     await bot.SendMessage(chatId, "Вы не являетесь студентом.");
                     return;
                 }
 
-                if (!user.Isverified)
+                if (!student.Isverified)
                 {
                     await bot.SendMessage(chatId, "Ваш аккаунт не верифицирован.");
                     return;
@@ -298,10 +298,16 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                     InlineKeyboardButton.WithCallbackData("❌ Отмена","student:cancel")
                 });
 
-                var delMsg = await bot.SendMessage(chatId, "Отправьте свой вопрос. Он должен быть связан только с вашей учебой. \nПостарайтесь задать конретный вопрос.", replyMarkup: inlineKeyboard, cancellationToken: ct);
+                if (student.LastInlineMessageId != 0)
+                {
+                    await bot.DeleteMessage(chatId, student.LastInlineMessageId, cancellationToken: ct);
+                    student.State = null;
+                }
 
-                user.State = "WaitingAskedQuestion";
-                user.LastInlineMessageId = delMsg.Id;
+                var messageToDelete = await bot.SendMessage(chatId, "Отправьте свой вопрос. Он должен быть связан только с вашей учебой. \nПостарайтесь задать конретный вопрос.", replyMarkup: inlineKeyboard, cancellationToken: ct);
+
+                student.State = "WaitingAskedQuestion";
+                student.LastInlineMessageId = messageToDelete.Id;
 
                 db.SaveChanges();
             }
@@ -315,6 +321,8 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
 
                 if (user == null)
                     return;
+
+
 
                 if(user.State == "WaitingForUploadNote")
                 {
