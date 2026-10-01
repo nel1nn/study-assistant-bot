@@ -1,7 +1,4 @@
 ﻿using dialogue_without_borders_tg_bot;
-using DocumentFormat.OpenXml.Drawing.Diagrams;
-using DocumentFormat.OpenXml.Spreadsheet;
-using DocumentFormat.OpenXml.Wordprocessing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Telegram.Bot;
@@ -250,11 +247,7 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                 },
                 new[]
                 {
-                    InlineKeyboardButton.WithCallbackData("✏️ Изменить загруженные заметки","teacher:editNote"),
-                },
-                new[]
-                {
-                    InlineKeyboardButton.WithCallbackData("🗑️ Удалить загруженные заметки","teacher:deleteNote"),
+                    InlineKeyboardButton.WithCallbackData("✏️ Управление заметками","teacher:editNote"),
                 },
                 new[]
                 {
@@ -339,11 +332,17 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
 
                     int noteId = note.Id;
 
+                    var messageToEdit = await bot.SendMessage(chatId, "Обработка заметки...", cancellationToken: ct);
+
                     AI aiService = new AI(config);
                     await aiService.GenerationNote(options, note.Id, bot);
 
-                    await bot.SendMessage(chatId, "Заметка успешно добавлена!", cancellationToken: ct);
+                    await bot.EditMessageText(chatId,messageToEdit.Id, "Заметка успешно добавлена!", cancellationToken: ct);
                     await bot.DeleteMessage(chatId, user.LastInlineMessageId, cancellationToken: ct);
+
+                    user.LastInlineMessageId = 0;
+                    db.SaveChanges();
+
                     return;
                 }
 
@@ -424,7 +423,7 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
 
                     teacher.LastInlineMessageId = messageToDelete.Id;
 
-                    teacher.NoteName= msg.Text;
+                    teacher.NoteName = msg.Text; // в данном случае я передаю сюда не имя заметки, а ее новое содержимое (в switch обработка идет с учетом этого)
 
                     db.SaveChanges();
                 }
@@ -501,21 +500,27 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                 var note = db.teacherNotes.FirstOrDefault(n=>n.Id==noteNum);
                 if (note == null) return;
 
-                note.FileId = msg.Document.FileId;
-                note.Text = msg.Caption;
-                note.CreatedTime = DateTime.Now;
-                note.FileName = msg.Document.FileName;
+                InlineKeyboardMarkup inlineKeyboard = (new[]
+{
+                        new[]
+                        {
+                            InlineKeyboardButton.WithCallbackData("✅ Подтвердить",$"teacher:confirmNoteDocumentContent:{noteNum}"),
+                        },
+                        new[]
+                        {
+                            InlineKeyboardButton.WithCallbackData("❌ Отмена",$"teacher:rejectNoteContent:{noteNum}"),
+                        }
+                    }
+                );
+
+                var messageToDelete = await bot.SendMessage(chatId, $"Подтвердите загрузку файла. Старое содержимое будет удалено.", replyMarkup: inlineKeyboard, cancellationToken: ct);
+
+                teacher.LastInlineMessageId = messageToDelete.Id;
+
+                // в данном случае в NoteName передается строка содержащая айди документа, его описание и название
+                teacher.NoteName = $"{msg.Document.FileId}&{msg.Caption}&{msg.Document.FileName}";
 
                 db.SaveChanges();
-
-                var messageToDelete = await bot.SendMessage(chatId, "Обработка загруженного файла... Время ожидания зависит от его объема, пожалуйста, подождите.", cancellationToken: ct);
-
-                AI aiService = new AI(config);
-
-                await aiService.GenerationNote(options, note.Id, bot);
-
-                await bot.DeleteMessage(chatId, messageToDelete.Id, cancellationToken:ct);
-                await bot.SendMessage(chatId, "Содержание заметки успешно обновлено!", cancellationToken: ct);
             }
 
             if (teacher.State == "WaitingForUploadNote")
@@ -536,7 +541,7 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
 
                 int noteId = note.Id;
 
-                await bot.SendMessage(chatId, "Обработка загруженного файла... Время ожидания зависит от его объема, пожалуйста, подождите.", cancellationToken: ct);
+                await bot.SendMessage(chatId, "Обработка загруженного файла... Время ожидания зависит от его объема, пожалуйста, подождите.\nОбычно это занимает не более 30 секунд. 🕕", cancellationToken: ct);
 
                 AI aiService = new AI(config);
 
@@ -546,6 +551,7 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
 
                 return;
             }
+
         }
     }
 }
@@ -878,7 +884,7 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         {
                         new[]
                         {
-                            InlineKeyboardButton.WithCallbackData("❌ Отмена","teacher:canсelUploadNote")
+                            InlineKeyboardButton.WithCallbackData("❌ Отмена","teacher:cancelUploadNote")
                         }
                         });
 
@@ -902,11 +908,11 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
 
                         teacher.State = null;
 
-                        db.SaveChanges();
-
                         await bot.DeleteMessage(chatId, messageId);
 
                         await bot.SendMessage(chatId, "Загрузка заметки отменена.");
+                        teacher.LastInlineMessageId = 0;
+                        db.SaveChanges();
                     }
                         return;
 
@@ -918,6 +924,14 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         if (teacher == null) return;
 
                         await bot.DeleteMessage(chatId, teacher.LastInlineMessageId);
+
+                        var inlineKeyboard = new InlineKeyboardMarkup(new[]
+{
+                        new[]
+                        {
+                            InlineKeyboardButton.WithCallbackData("❌ Отмена","teacher:cancelUploadNote")
+                        }
+                        });
 
                         var messageToDelete = await bot.SendMessage(chatId, "Пришлите название заметки", cancellationToken: ct);
 
@@ -1024,6 +1038,8 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         if (teacherNotes.Count == 0)
                         {
                             await bot.SendMessage(chatId, "У Вас нет заметок 😞", cancellationToken: ct);
+                            teacher.LastInlineMessageId = 0;
+                            db.SaveChanges();
                             return;
                         }
 
@@ -1087,6 +1103,10 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                             },
                             new[]
                             {
+                                InlineKeyboardButton.WithCallbackData("🗑️ Удалить заметку",$"teacher:deleteNoteNum:{note.Id}")
+                            },
+                            new[]
+                            {
                                 InlineKeyboardButton.WithCallbackData("❌ Отмена","teacher:editNote")
                             }
                         }
@@ -1128,31 +1148,27 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                     {
                         int noteNum = int.Parse(parts[2]);
                         var teacher = db.Teachers.FirstOrDefault(t => t.TgId == query.From.Id);
-                        var note = db.teacherNotes.FirstOrDefault(n=>n.TeacherTgId == query.From.Id);
+                        var note = db.teacherNotes.FirstOrDefault(n=>n.Id == noteNum);
 
-                        if (teacher == null || note == null) return;
-
-                        // текстовая заметка
-                        if(string.IsNullOrEmpty(note.FileName))
+                        if (teacher == null || note == null)
                         {
-                            await bot.DeleteMessage(chatId, teacher.LastInlineMessageId, cancellationToken: ct);
-
-                            var inlineKeyboard = new InlineKeyboardMarkup(new[]
-                            {
-                                InlineKeyboardButton.WithCallbackData("❌ Отмена", $"teacher:editNoteNum:{noteNum}")
-                            });
-
-                            var messageToDelete = await bot.SendMessage(chatId, "Пришлите новое содержание файла.", cancellationToken: ct, replyMarkup: inlineKeyboard); ;
-
-                            teacher.LastInlineMessageId = messageToDelete.Id;
-                            teacher.State = $"WaitingSendNewNoteContent:{noteNum}";
-
-                            db.SaveChanges();
+                            await bot.SendMessage(chatId, "ошибка");
+                            return;
                         }
-                        
 
-                        //заметка с файлом
-
+                         await bot.DeleteMessage(chatId, teacher.LastInlineMessageId, cancellationToken: ct);
+                         
+                         var inlineKeyboard = new InlineKeyboardMarkup(new[]
+                         {
+                             InlineKeyboardButton.WithCallbackData("❌ Отмена", $"teacher:editNoteNum:{noteNum}")
+                         });
+                         
+                         var messageToDelete = await bot.SendMessage(chatId, "Пришлите новое содержимое заметки текстом или файлом (docx, txt)", cancellationToken: ct, replyMarkup: inlineKeyboard); ;
+                         
+                         teacher.LastInlineMessageId = messageToDelete.Id;
+                         teacher.State = $"WaitingSendNewNoteContent:{noteNum}";
+                         
+                         db.SaveChanges();
                     }    
                     return;
 
@@ -1200,15 +1216,28 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                     return;
 
                 case "confirmNoteTextContent":
-                    using(var db = new ApplicationContext(options))
+                    using (var db = new ApplicationContext(options))
                     {
                         int noteNum = int.Parse(parts[2]);
                         var teacher = db.Teachers.FirstOrDefault(t => t.TgId == query.From.Id);
                         var note = db.teacherNotes.FirstOrDefault(n => n.Id == noteNum);
 
+                        if (teacher == null || note == null) return;
+
                         note.Text = teacher.NoteName;
                         note.CreatedTime = DateTime.Now;
                         teacher.NoteName = null;
+
+                        // Удаляем все старые объявления этой заметки напрямую из базы
+                        db.studyAnnouncements.Where(a => a.TeacherDocumentId == noteNum).ExecuteDelete();
+
+
+                        await bot.DeleteMessage(chatId, teacher.LastInlineMessageId, cancellationToken: ct);
+
+                        teacher.LastInlineMessageId = 0;
+                        
+
+                        db.SaveChanges();
 
                         var editMessage = await bot.SendMessage(chatId, "Изменения применяются...", cancellationToken: ct);
 
@@ -1216,20 +1245,75 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         await aiService.GenerationNote(options, note.Id, bot);
 
                         await bot.EditMessageText(chatId, editMessage.Id, "Содержимое заметки успешно изменено!", cancellationToken: ct);
+                    }
+                    return;
+
+                case "confirmNoteDocumentContent":
+                    using (var db = new ApplicationContext(options))
+                    {
+                        int noteId = int.Parse(parts[2]);
+                        var note = db.teacherNotes.FirstOrDefault(n => n.Id == noteId);
+                        var teacher = db.Teachers.FirstOrDefault(t => t.TgId == query.From.Id);
+                        if (note == null || teacher == null) return;
+
+                        string[] infoAboutNote = teacher.NoteName!.Split('&');
+                        note.FileId = infoAboutNote[0];
+                        note.Text = infoAboutNote[1];
+                        note.CreatedTime = DateTime.Now;
+                        note.FileName = infoAboutNote[2];
+
                         await bot.DeleteMessage(chatId, teacher.LastInlineMessageId, cancellationToken: ct);
                         teacher.LastInlineMessageId = 0;
 
+                        // Удаляем все старые объявления этой заметки напрямую одним SQL-запросом
+                        db.studyAnnouncements.Where(a => a.TeacherDocumentId == noteId).ExecuteDelete();
+
+                        db.SaveChanges();
+
+                        var messageToDelete = await bot.SendMessage(chatId, "Обработка загруженного файла... Время ожидания зависит от его объема, пожалуйста, подождите.", cancellationToken: ct);
+
+                        AI aiService = new AI(config);
+                        await aiService.GenerationNote(options, note.Id, bot);
+
+                        await bot.DeleteMessage(chatId, messageToDelete.Id, cancellationToken: ct);
+                        await bot.SendMessage(chatId, "Содержание заметки успешно обновлено!", cancellationToken: ct);
+                    }
+                    return;
+
+                case "deleteNoteNum":
+                    using (var db = new ApplicationContext(options))
+                    {
+                        int noteId = int.Parse(parts[2]);
+                        var teacher = db.Teachers.FirstOrDefault(t => t.TgId == query.From.Id);
+                        if (teacher == null) return;
+
+                        var inlineKeyboard = new InlineKeyboardMarkup(new[]{
+                        new[] {InlineKeyboardButton.WithCallbackData("✅ Подтвердить", $"teacher:confirmDeleteNoteNum:{noteId}") },
+                        new[] {InlineKeyboardButton.WithCallbackData("❌ Отмена", $"teacher:editNoteNum:{noteId}") }
+                        });
+
+                        await bot.EditMessageText(chatId, teacher.LastInlineMessageId, "Подтвердить удаление? Отменить это действие невозможно.");
+                        await bot.EditMessageReplyMarkup(chatId, teacher.LastInlineMessageId, inlineKeyboard, cancellationToken: ct);
+
+                    }
+                    return;
+
+                case "confirmDeleteNoteNum":
+                    using (var db = new ApplicationContext(options))
+                    {
+                        int noteId = int.Parse(parts[2]);
+                        var note = db.teacherNotes.FirstOrDefault(n=>n.Id == noteId);
+                        var teacher = db.Teachers.FirstOrDefault(t=>t.TgId == query.From.Id);
+                        if(note == null || teacher == null) return;
+
+                        db.teacherNotes.Remove(note);
+
+                        await bot.DeleteMessage(chatId,teacher.LastInlineMessageId, cancellationToken: ct);
+
+                        var messageToDelete = bot.SendMessage(chatId,"Заметка успешно удалена.", cancellationToken: ct);
+                        teacher.LastInlineMessageId = 0;
                         db.SaveChanges();
                     }
-                    // остановился тут
-                    return;
-
-                case "deleteNote":
-
-                    return;
-
-                case "cancelDeleteNote":
-
                     return;
 
                 case "canсel":
@@ -1249,24 +1333,20 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         if (teacher == null) return;
 
                         var inlineKeyboard = new InlineKeyboardMarkup(new[]
+                        {
+                       new[]
+                           {
+                    InlineKeyboardButton.WithCallbackData("📋 Загрузить новую заметку","teacher:uploadNote"),
+                           },
+                          new[]
                           {
-                            new[]
-                            {
-                                InlineKeyboardButton.WithCallbackData("📋 Загрузить новую заметку","teacher:uploadNote"),
-                            },
-                            new[]
-                            {
-                                InlineKeyboardButton.WithCallbackData("✏️ Изменить загруженные заметки","teacher:editNote"),
-                            },
-                            new[]
-                            {
-                                InlineKeyboardButton.WithCallbackData("🗑️ Удалить загруженные заметки","teacher:deleteNote"),
-                            },
-                            new[]
-                            {
-                                InlineKeyboardButton.WithCallbackData("❌ Отмена","teacher:canсel")
-                            }
-                            });
+                    InlineKeyboardButton.WithCallbackData("✏️ Управление заметками","teacher:editNote"),
+                          },
+                          new[]
+                         {
+                    InlineKeyboardButton.WithCallbackData("❌ Отмена","teacher:canсel")
+                         }
+                        });
 
                         await bot.DeleteMessage(chatId, teacher.LastInlineMessageId, cancellationToken: ct);
 

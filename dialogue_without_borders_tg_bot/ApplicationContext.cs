@@ -24,5 +24,17 @@ namespace dialogue_without_borders_tg_bot
         {
             Database.EnsureCreated();
         }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+
+            modelBuilder.Entity<StudyAnnouncement>()
+                .HasOne(a => a.Document)         
+                .WithMany(n => n.Announcements)
+                .HasForeignKey(a => a.TeacherDocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        }
     }
 }

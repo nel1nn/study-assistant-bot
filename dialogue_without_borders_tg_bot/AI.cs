@@ -64,8 +64,20 @@ namespace dialogue_without_borders_tg_bot
                     // 5. Перематываем каретку потока на самое начало (байт 0)
                     memoryStream.Position = 0;
 
-                    // 6. Передаем именно поток байтов memoryStream в наш метод парсинга
-                    textToParse = ExtractTextFromDocx(memoryStream);
+                    // 6. Определяем расширение и вызываем нужный метод парсинга
+                    string extension = Path.GetExtension(note.FileName)?.ToLower() ?? "";
+
+                    string fileContent = extension switch
+                    {
+                        ".docx" => ExtractTextFromDocx(memoryStream),
+                        ".txt" => await ExtractTextFromTxtAsync(memoryStream),
+                        _ => ""
+                    };
+
+                    // Если к файлу была подпись, объединяем её с текстом файла
+                    textToParse = string.IsNullOrWhiteSpace(note.Text)
+                        ? fileContent
+                        : $"{note.Text}\n{fileContent}".Trim();
                 }
 
                 // если отправлен текст
@@ -76,7 +88,7 @@ namespace dialogue_without_borders_tg_bot
 
                 var messages = new List<ChatMessage>
                 {
-                new SystemChatMessage($"Проанализируй документ и/или текст преподавателя. Разбей его на отдельные объявления. Для каждой записи верни JSON с ключом \"announcements\", внутри которого массив объектов: TargetGroup (группа, если указана, или \"all\"), Topic (тема: пересдача, дедлайн, лекция), Content (суть объявления), EventDate (дата события в формате день.месяц.год часы:минуты. Нынешнаяя дата - {DateTime.Today.ToString("d")}), NoteName - название, которое ты бы дал этой заметке (придумай лаконичное название). Не нужно присылать пояснения, необходим только JSON файл."), // системная инструкция
+                new SystemChatMessage($"Проанализируй документ и/или текст преподавателя. Разбей его на отдельные объявления. Для каждой записи верни JSON с ключом \"announcements\", внутри которого массив объектов: TargetGroup (группа, если указана, или \"all\"), TargetCourse (номер курса), если указан, или 0), Topic (тема: пересдача, дедлайн, лекция), Content (суть объявления), EventDate (дата события в формате день.месяц.год часы:минуты. Нынешнаяя дата - {DateTime.Today.ToString("d")}), NoteName - название, которое ты бы дал этой заметке (придумай лаконичное название). Если заметка не связана с учебой - игнорируй ее. Если группа написана в формате 2ИСИП124 - трактуй это как группа ИСИП-124 2 курса. Не нужно присылать пояснения, необходим только JSON файл."), // системная инструкция
                 new UserChatMessage(textToParse) // текст самой заметки
                 };
 
@@ -102,6 +114,7 @@ namespace dialogue_without_borders_tg_bot
                             Topic = item.Topic,
                             Content = item.Content,
                             EventDate = item.EventDate,
+                            TargetСourse = item.TargetCourse
                         };
                         note.Announcements.Add(announcement);
                     }
@@ -109,7 +122,6 @@ namespace dialogue_without_borders_tg_bot
                 }
             }
         }
-
         public static string ExtractTextFromDocx(Stream stream)
         {
             var sb = new StringBuilder();
@@ -137,7 +149,11 @@ namespace dialogue_without_borders_tg_bot
 
             return sb.ToString();
         }
-
+        public static async Task<string> ExtractTextFromTxtAsync(Stream stream)
+        {
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+            return await reader.ReadToEndAsync();
+        }
         public async Task<string> GenerationAnswer(DbContextOptions<ApplicationContext> options, string group, int course, string name, string surname, string question)
         {
             using (ApplicationContext db = new ApplicationContext(options))
@@ -199,6 +215,7 @@ namespace dialogue_without_borders_tg_bot
             public string Topic { get; set; } = null!;
             public string Content { get; set; } = null!;
             public string? EventDate { get; set; }
+            public int TargetCourse { get; set; }
         }
     }
 }
