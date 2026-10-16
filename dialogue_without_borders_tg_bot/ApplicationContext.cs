@@ -15,6 +15,8 @@ namespace dialogue_without_borders_tg_bot
 
         public DbSet<TeacherDB> Teachers { get; set; } = null!;
 
+        public DbSet<AdminDB> Admins { get; set; } = null!;
+
         public DbSet<TeacherNote> teacherNotes { get; set; } = null!;
 
         public DbSet<StudyAnnouncement> studyAnnouncements { get; set; } = null!;

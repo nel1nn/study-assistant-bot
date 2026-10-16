@@ -22,9 +22,9 @@ namespace dialogue_without_borders_tg_bot
         }
         public async Task GenerationNote(DbContextOptions<ApplicationContext> options, int noteId, ITelegramBotClient bot)
         {
-            string endpoint = "https://api.groq.com/openai/v1"; // переадресация запросов на сайт qroq
+            string endpoint = "https://api.groq.com/openai/v1"; // переадресация запросов на сайт groq
 
-            var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(endpoint) };
+            var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(endpoint), NetworkTimeout = TimeSpan.FromMinutes(2) }; // чтобы зависший запрос к groq не висел бесконечно
             var client = new OpenAIClient(new ApiKeyCredential(_apiKey), clientOptions);
             var chatClient = client.GetChatClient("openai/gpt-oss-120b");
 
@@ -83,28 +83,58 @@ namespace dialogue_without_borders_tg_bot
                 // если отправлен текст
                 else
                 {
-                    textToParse = note.Text;
+                    textToParse = note.Text!;
                 }
 
+                // Промпт для анализа заметки/ведомости преподавателя и разбивки на записи
                 var messages = new List<ChatMessage>
                 {
-                new SystemChatMessage($"Проанализируй документ и/или текст преподавателя. Разбей его на отдельные объявления. Для каждой записи верни JSON с ключом \"announcements\", внутри которого массив объектов: TargetGroup (группа, если указана, или \"all\"), TargetCourse (номер курса), если указан, или 0), Topic (тема: пересдача, дедлайн, лекция), Content (суть объявления), EventDate (дата события в формате день.месяц.год часы:минуты. Нынешнаяя дата - {DateTime.Today.ToString("d")}), NoteName - название, которое ты бы дал этой заметке (придумай лаконичное название). Если заметка не связана с учебой - игнорируй ее. Если группа написана в формате 2ИСИП124 - трактуй это как группа ИСИП-124 2 курса. Не нужно присылать пояснения, необходим только JSON файл."), // системная инструкция
-                new UserChatMessage(textToParse) // текст самой заметки
+                    new SystemChatMessage($$"""
+                        Ты — структуризатор учебных документов. Твоя задача — извлечь факты из текста преподавателя и вернуть СТРОГО JSON-объект с ключом "announcements".
+                        Нынешняя дата: {{DateTime.Today:dd.MM.yyyy}}.
+
+                        СТРУКТУРА ОТВЕТА:
+                        {
+                          "announcements": [
+                            {
+                              "TargetGroup": "Название группы в формате ИСИП 124 (без номера курса в начале) или 'all', если для всех",
+                              "TargetCourse": Номер курса числом (0 если не указан),
+                              "Topic": "Краткая тема или 'Тема: Фамилия'",
+                              "Content": "Суть объявления или персональный статус студента",
+                              "EventDate": "Дата и время в формате ДД.ММ.ГГГГ ЧЧ:ММ (или null)"
+                            }
+                          ]
+                        }
+
+                        ПРАВИЛА ИЗВЛЕЧЕНИЯ:
+                        1. Если текст адресован всей группе (пересдача, лекция, перенос) — создай ОДИН объект в массиве "announcements".
+                        2. Если группа написана слитно с курсом (например, 3ИСИП124 или 2 ИСИП-124) — запиши курс в TargetCourse (3 или 2), а в TargetGroup оставь специальность и номер (например, "ИСИП 124").
+                        3. Если текст содержит список/таблицу с результатами, оценками или статусами (сдал/не сдал) конкретных студентов — создай ОТДЕЛЬНЫЙ объект в массиве "announcements" на КАЖДОГО упомянутого студента.
+                        4. Для персональной записи:
+                           - В поле "Topic" укажи тему и фамилию (например: "Сдача контрольной 5: Щеголев").
+                           - В поле "Content" укажи статус конкретного человека (например: "Щеголев: Сдал").
+                        5. В ответе должен быть ТОЛЬКО чистый валидный JSON без пояснений и лишнего текста.
+                        """),
+
+                    new UserChatMessage($"""
+                        Дисциплина: {note.Discipline ?? "Не указана"}
+                        Название заметки: {note.NoteName}
+                        Текст заметки:
+                        {textToParse}
+                        """)
                 };
 
                 ChatCompletion response = await chatClient.CompleteChatAsync(messages, chatOptions);
                 string jsonResult = response.Content[0].Text;
 
                 // Превращаем текст в готовые объекты C#
-                var parsedData = JsonSerializer.Deserialize<GroqAnnouncementResponse>(jsonResult);
-
-                if (parsedData != null && parsedData.announcements.Count > 0)
+                var parsedData = JsonSerializer.Deserialize<GroqAnnouncementResponse>(jsonResult, new JsonSerializerOptions
                 {
-                    if (note == null)
-                    {
-                        return;
-                    }
+                    PropertyNameCaseInsensitive = true
+                });
 
+                if (parsedData != null && parsedData.announcements != null && parsedData.announcements.Count > 0)
+                {
                     foreach (var item in parsedData.announcements)
                     {
                         // Создаем дочернюю сущность для БД
@@ -114,7 +144,7 @@ namespace dialogue_without_borders_tg_bot
                             Topic = item.Topic,
                             Content = item.Content,
                             EventDate = item.EventDate,
-                            TargetСourse = item.TargetCourse
+                            TargetCourse = item.TargetCourse
                         };
                         note.Announcements.Add(announcement);
                     }
@@ -154,34 +184,52 @@ namespace dialogue_without_borders_tg_bot
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
             return await reader.ReadToEndAsync();
         }
-        public async Task<string> GenerationAnswer(DbContextOptions<ApplicationContext> options, string group, int course, string name, string surname, string question)
+        public async Task<string> GenerationAnswer(DbContextOptions<ApplicationContext> options, string group,string speciality, int course, string name, string surname, string question)
         {
             using (ApplicationContext db = new ApplicationContext(options))
             {
-                var cutoffDate = DateTime.Now.AddDays(-30); // Заметки не старше 30 дней
+                if(string.IsNullOrWhiteSpace(question))
+                {
+                    return "К сожалению, актуальных объявлений для вашей группы не найдено.";
+                }
+
+                //var cutoffDate = DateTime.Now.AddDays(-30); // Заметки не старше 30 дней
+
+                string cleanGroup = group.Replace(" ", "").Replace("-", "").ToLower();
 
                 // подходящие записи
                 var announcements = db.studyAnnouncements
-                    .Include(a => a.Document) // Подтягиваем родительскую заметку
-                    .Where(a => (a.TargetGroup == group || a.TargetGroup == "all")
-                          && a.Document.CreatedTime >= cutoffDate) // Фильтр по дате создания
-                    .OrderByDescending(a => a.Document.CreatedTime)   // Сначала самые свежие
-                    .Take(15)                                        // Ограничиваем 15 последними записями
+                    .Include(a => a.Document)
+                    .AsEnumerable() // переводим фильтрацию строк в память для удобного сравнения
+                    .Where(a => a.TargetGroup == "all" ||
+                                a.TargetGroup.Replace(" ", "").Replace("-", "").ToLower() == cleanGroup)
+                    //.Where(a => a.Document.CreatedTime >= cutoffDate)
+                    .OrderByDescending(a => a.Document.CreatedTime)
+                    .Take(15)
                     .ToList();
 
-                
+
                 //формирование запроса
-                string currectAnnouncements = "";
+                string currentAnnouncements = "";
 
                 foreach (var announcement in announcements)
                 {
-                    currectAnnouncements += $"|Создано: {announcement.Document.CreatedTime}|Тема: {announcement.Topic}|Содержание: {announcement.Content}|Дата события: {announcement.EventDate}\n";
+                    currentAnnouncements += $"|Предмет: {announcement.Document.Discipline ?? "Общий"}" +
+                        $"|Заметка: {announcement.Document.NoteName}" +
+                        $"|Тема: {announcement.Topic}" +
+                        $"|Содержание: {announcement.Content}" +
+                        $"|Дата события: {announcement.EventDate}\n";
                 }
 
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine($"[DEBUG] Поиск для группы: '{group}' (clean: '{cleanGroup}')");
+                Console.WriteLine($"[DEBUG] Найдено объявлений в БД: {announcements.Count}");
+                Console.WriteLine($"[DEBUG] Сформированный контекст:\n{currentAnnouncements}");
+                Console.ResetColor();
 
-                string endpoint = "https://api.groq.com/openai/v1"; // переадресация запросов на сайт qroq
+                string endpoint = "https://api.groq.com/openai/v1"; // переадресация запросов на сайт groq
 
-                var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(endpoint) };
+                var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(endpoint), NetworkTimeout = TimeSpan.FromMinutes(2) }; // чтобы зависший запрос к groq не висел бесконечно
                 var client = new OpenAIClient(new ApiKeyCredential(_apiKey), clientOptions);
                 var chatClient = client.GetChatClient("openai/gpt-oss-20b");
 
@@ -193,8 +241,15 @@ namespace dialogue_without_borders_tg_bot
 
                 var messages = new List<ChatMessage>
                 {
-                new SystemChatMessage($"Ты - помощник учителя. Отвечай студенту вежливо и кратко, используя ТОЛЬКО факты из списка ниже. Если ответа на вопрос студента в списке нет, прямо напиши, что информации не найдено. Имя студента - {name}. Фамилия студента - {surname}. Курс - {course}. Группа - {group}. Вопрос студента - {question}"), // системная инструкция
-                new UserChatMessage(currectAnnouncements) // текст самой заметки
+                  new SystemChatMessage(
+                                        $"Ты — виртуальный помощник учебной части. Отвечай студенту вежливо, кратко и по делу.\n" +
+                                        $"Имя студента: {name} {surname}, Курс: {course}, Группа: {group}, Специальность: {speciality}.\n\n" +
+                                        $"Правила:\n" +
+                                        $"1. Отвечай, опираясь ТОЛЬКО на список объявлений ниже.\n" +
+                                        $"2. Если в объявлениях нет точного ответа на вопрос студента, прямо скажи: 'Информации по вашему запросу не найдено'.\n\n" +
+                                        $"Список объявлений:\n{currentAnnouncements}"
+                                     ),
+                  new UserChatMessage(question) // Сам вопрос студента
                 };
 
                 ChatCompletion response = await chatClient.CompleteChatAsync(messages, chatOptions);

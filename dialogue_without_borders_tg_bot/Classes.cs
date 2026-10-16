@@ -13,10 +13,8 @@ namespace dialogue_without_borders_tg_bot
         public long TgId { get; set; }
         public string TgUsername { get; set; } = null!;
         public bool Isverified { get; set; } = false;
-
         public string? Name { get; set; }
         public string? Surname { get; set; }
-
         public string? Patronymic { get; set; }
 
         public string? State { get; set; }
@@ -27,7 +25,8 @@ namespace dialogue_without_borders_tg_bot
     {
         public string? StudentCardFileId { get; set; }
         public long? StudentCardNumber { get; set; }
-        public string Group { get; set; } = null!;
+        public int Group { get; set; }
+        public string Speciality { get; set; } = null!;
         public int Course { get; set; }
     }
 
@@ -65,7 +64,7 @@ namespace dialogue_without_borders_tg_bot
         public TeacherNote Document { get; set; } = null!;
 
         public string TargetGroup { get; set; } = "all"; // Номер группы или "all"
-        public int TargetСourse {  get; set; } // номер курса
+        public int TargetCourse {  get; set; } // номер курса
         public string Topic { get; set; } = null!;       // Тематика: "Пересдача", "Дедлайн", "Вопросы к экзамену"
         public string Content { get; set; } = null!;     // Четкий факт/информация
         public string? EventDate { get; set; }          // Дата события (если нейросеть её нашла, напр. "20.09")
