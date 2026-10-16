@@ -1,0 +1,11 @@
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Data Source=Message.db"
+  },
+  "BotConfiguration": {
+    "BotToken": "ВАШ_ТОКЕН_ОТ_BOTFATHER"
+  },
+  "GroqConfiguration": {
+    "ApiKey": "ВАШ_КЛЮЧ_GROQ"
+  }
+}
