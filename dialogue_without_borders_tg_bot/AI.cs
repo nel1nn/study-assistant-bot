@@ -22,9 +22,9 @@ namespace dialogue_without_borders_tg_bot
         }
         public async Task GenerationNote(DbContextOptions<ApplicationContext> options, int noteId, ITelegramBotClient bot)
         {
-            string endpoint = "https://api.groq.com/openai/v1"; // переадресация запросов на сайт groq
+            string endpoint = "https://api.groq.com/openai/v1";
 
-            var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(endpoint), NetworkTimeout = TimeSpan.FromMinutes(2) }; // чтобы зависший запрос к groq не висел бесконечно
+            var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(endpoint), NetworkTimeout = TimeSpan.FromMinutes(2) };
             var client = new OpenAIClient(new ApiKeyCredential(_apiKey), clientOptions);
             var chatClient = client.GetChatClient("openai/gpt-oss-120b");
 
@@ -43,28 +43,20 @@ namespace dialogue_without_borders_tg_bot
                     return;
                 }
 
-                // берем текст который будем парсить
                 string textToParse = "";
 
-                // если отправлен файл
                 if (note.FileId != null)
                 {
-                    // 1. У нас есть FileId из базы данных
                     string fileId = note.FileId;
 
-                    // 2. Узнаем внутренний путь к файлу на серверах Telegram
                     var fileInfo = await bot.GetFile(fileId);
 
-                    // 3. Создаем в оперативной памяти поток (контейнер для байтов)
                     using var memoryStream = new MemoryStream();
 
-                    // 4. Скачиваем байты файла из интернета прямо в memoryStream
                     await bot.DownloadFile(fileInfo.FilePath!, memoryStream);
 
-                    // 5. Перематываем каретку потока на самое начало (байт 0)
                     memoryStream.Position = 0;
 
-                    // 6. Определяем расширение и вызываем нужный метод парсинга
                     string extension = Path.GetExtension(note.FileName)?.ToLower() ?? "";
 
                     string fileContent = extension switch
@@ -74,19 +66,16 @@ namespace dialogue_without_borders_tg_bot
                         _ => ""
                     };
 
-                    // Если к файлу была подпись, объединяем её с текстом файла
                     textToParse = string.IsNullOrWhiteSpace(note.Text)
                         ? fileContent
                         : $"{note.Text}\n{fileContent}".Trim();
                 }
 
-                // если отправлен текст
                 else
                 {
                     textToParse = note.Text!;
                 }
 
-                // Промпт для анализа заметки/ведомости преподавателя и разбивки на записи
                 var messages = new List<ChatMessage>
                 {
                     new SystemChatMessage($$"""
@@ -127,7 +116,6 @@ namespace dialogue_without_borders_tg_bot
                 ChatCompletion response = await chatClient.CompleteChatAsync(messages, chatOptions);
                 string jsonResult = response.Content[0].Text;
 
-                // Превращаем текст в готовые объекты C#
                 var parsedData = JsonSerializer.Deserialize<GroqAnnouncementResponse>(jsonResult, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
@@ -137,7 +125,6 @@ namespace dialogue_without_borders_tg_bot
                 {
                     foreach (var item in parsedData.announcements)
                     {
-                        // Создаем дочернюю сущность для БД
                         var announcement = new StudyAnnouncement
                         {
                             TargetGroup = item.TargetGroup,
@@ -193,23 +180,17 @@ namespace dialogue_without_borders_tg_bot
                     return "К сожалению, актуальных объявлений для вашей группы не найдено.";
                 }
 
-                //var cutoffDate = DateTime.Now.AddDays(-30); // Заметки не старше 30 дней
-
                 string cleanGroup = group.Replace(" ", "").Replace("-", "").ToLower();
 
-                // подходящие записи
                 var announcements = db.studyAnnouncements
                     .Include(a => a.Document)
-                    .AsEnumerable() // переводим фильтрацию строк в память для удобного сравнения
+                    .AsEnumerable()
                     .Where(a => a.TargetGroup == "all" ||
                                 a.TargetGroup.Replace(" ", "").Replace("-", "").ToLower() == cleanGroup)
-                    //.Where(a => a.Document.CreatedTime >= cutoffDate)
                     .OrderByDescending(a => a.Document.CreatedTime)
                     .Take(15)
                     .ToList();
 
-
-                //формирование запроса
                 string currentAnnouncements = "";
 
                 foreach (var announcement in announcements)
@@ -227,9 +208,9 @@ namespace dialogue_without_borders_tg_bot
                 Console.WriteLine($"[DEBUG] Сформированный контекст:\n{currentAnnouncements}");
                 Console.ResetColor();
 
-                string endpoint = "https://api.groq.com/openai/v1"; // переадресация запросов на сайт groq
+                string endpoint = "https://api.groq.com/openai/v1";
 
-                var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(endpoint), NetworkTimeout = TimeSpan.FromMinutes(2) }; // чтобы зависший запрос к groq не висел бесконечно
+                var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(endpoint), NetworkTimeout = TimeSpan.FromMinutes(2) };
                 var client = new OpenAIClient(new ApiKeyCredential(_apiKey), clientOptions);
                 var chatClient = client.GetChatClient("openai/gpt-oss-20b");
 
@@ -249,7 +230,7 @@ namespace dialogue_without_borders_tg_bot
                                         $"2. Если в объявлениях нет точного ответа на вопрос студента, прямо скажи: 'Информации по вашему запросу не найдено'.\n\n" +
                                         $"Список объявлений:\n{currentAnnouncements}"
                                      ),
-                  new UserChatMessage(question) // Сам вопрос студента
+                  new UserChatMessage(question)
                 };
 
                 ChatCompletion response = await chatClient.CompleteChatAsync(messages, chatOptions);

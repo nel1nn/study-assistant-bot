@@ -8,7 +8,6 @@ using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
 
-
 using var cts = new CancellationTokenSource();
 
 var receiverOptions = new ReceiverOptions
@@ -16,13 +15,11 @@ var receiverOptions = new ReceiverOptions
     AllowedUpdates = [UpdateType.Message, UpdateType.CallbackQuery]
 };
 
-// Чтение конфигурации
 var builder = new ConfigurationBuilder();
 builder.SetBasePath(Directory.GetCurrentDirectory());
 builder.AddJsonFile("config.json");
 var config = builder.Build();
 
-// Подключение
 var connectionString = config.GetConnectionString("DefaultConnection");
 string botToken = config["BotConfiguration:BotToken"]
     ?? throw new InvalidOperationException("BotToken не найден в config.json");
@@ -45,7 +42,6 @@ botClient.StartReceiving(
 );
 
 Console.WriteLine("Бот запущен. Нажми Enter для безопасного завершения работы\n");
-// если консоли нет (запуск как служба или в docker), ReadLine сразу вернет null - тогда работаем, пока процесс не остановят
 if (Console.ReadLine() == null)
     await Task.Delay(Timeout.Infinite);
 
@@ -55,8 +51,6 @@ using (var db = new ApplicationContext(options))
     Console.ForegroundColor = ConsoleColor.Green;
     foreach (var user in users)
     {
-        // сбрасываем только состояния меню. Состояния регистрации и верификации (WaitingForFullName, AwaitingForVerification и т.д.)
-        // оставляем, иначе пользователь застрянет в недорегистрированном профиле, а заявки пропадут у админа
         if (user.State == null || user.State == "WaitingForUploadNote" || user.State == "WaitingForUploadNoteName" || user.State == "WaitingAskedQuestion" ||
             user.State.StartsWith("WaitingSendNewNoteName:") || user.State.StartsWith("WaitingSendNewNoteContent:"))
         {
@@ -73,7 +67,6 @@ cts.Cancel();
 
 Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken ct)
 {
-    // обработка запускается в отдельной задаче, чтобы долгий ответ ИИ не блокировал остальных пользователей
     Task.Run(async () =>
     {
         try
@@ -141,11 +134,6 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                         cancellationToken: ct
                     );
 
-                    // 1. выбор роли
-                    // 2. подтверждение
-                    // 3. Расширеная регистрация - ввод ФИО итд
-                    // 4. Подтверждение введеных данных
-                    // 5. Отправка данных на проверку (завершение авторизации)
                 }
                     
                 return;
@@ -155,7 +143,6 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                 {
                     var user = db.Users.FirstOrDefault(u => u.TgId == fromUserId);
 
-                    // темы показываются в зависимости от роли: незарегистрированному только про регистрацию
                     var buttons = new List<InlineKeyboardButton[]>
                     {
                         new[] { InlineKeyboardButton.WithCallbackData("📝 Как зарегистрироваться?", "help:topic:1") },
@@ -200,7 +187,7 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                     if (admin.LastInlineMessageId != 0)
                     {
                         try { await bot.DeleteMessage(chatId, admin.LastInlineMessageId, cancellationToken: ct); }
-                        catch (Exception) { } // старое меню могло быть уже удалено или старше 48 часов - телеграм не даст его удалить
+                        catch (Exception) { }
                         admin.State = null;
                     }
 
@@ -269,7 +256,7 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                     if (teacher.LastInlineMessageId != 0)
                     {
                         try { await bot.DeleteMessage(chatId, teacher.LastInlineMessageId, cancellationToken: ct); }
-                        catch (Exception) { } // старое меню могло быть уже удалено или старше 48 часов - телеграм не даст его удалить
+                        catch (Exception) { }
                         teacher.State = null;
                     }
 
@@ -306,7 +293,7 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                     if (student.LastInlineMessageId != 0)
                     {
                         try { await bot.DeleteMessage(chatId, student.LastInlineMessageId, cancellationToken: ct); }
-                        catch (Exception) { } // старое меню могло быть уже удалено или старше 48 часов - телеграм не даст его удалить
+                        catch (Exception) { }
                         student.State = null;
                     }
 
@@ -433,7 +420,7 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                         });
 
                             try { await bot.DeleteMessage(chatId, teacher.LastInlineMessageId, cancellationToken: ct); }
-                            catch (Exception) { } // старое меню могло быть уже удалено или старше 48 часов - телеграм не даст его удалить
+                            catch (Exception) { }
                             var messageToDelete = await bot.SendMessage(chatId, $"Подтвердить переименование?\n<s>{WebUtility.HtmlEncode(note.NoteName)}</s> ➡️ {WebUtility.HtmlEncode(msg.Text)}", cancellationToken: ct, replyMarkup: inlineKeyboard, parseMode: ParseMode.Html);
                             teacher.LastInlineMessageId = messageToDelete.Id;
                             teacher.NoteName = msg.Text;
@@ -454,7 +441,7 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
 
                             teacher.LastInlineMessageId = messageToDelete.Id;
 
-                            teacher.NoteName = msg.Text; // в данном случае я передаю сюда не имя заметки, а ее новое содержимое (в switch обработка идет с учетом этого)
+                            teacher.NoteName = msg.Text;
 
                             db.SaveChanges();
                             break;
@@ -483,7 +470,6 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                                 answer = "⚠️ Не удалось получить ответ. Попробуйте задать вопрос позже.";
                             }
 
-                            // телеграм не отправит пустое сообщение или сообщение длиннее 4096 символов
                             if (string.IsNullOrWhiteSpace(answer)) answer = "Информации по вашему запросу не найдено.";
                             if (answer.Length > 4000) answer = answer.Substring(0, 4000) + "...";
 
@@ -589,7 +575,6 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
                 });
                 var messageToDelete = await bot.SendMessage(chatId, "Подтвердить отправку фотографии?", replyMarkup: inlineKeyboard, cancellationToken: ct);
 
-                // msg.Photo — это массив размеров одной фотографии. Последний элемент [^1] — максимальное качество
                 user.StudentCardFileId = msg.Photo[^1].FileId;
 
                 user.LastInlineMessageId = messageToDelete.MessageId;
@@ -609,7 +594,6 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
             if (teacher == null)
                 return;
 
-            // если файл не txt или docx
             if (msg.Document.FileName == null || !(msg.Document.FileName.EndsWith(".txt") || msg.Document.FileName.EndsWith(".docx")) )
             {
                  await bot.SendMessage(chatId, "Файл такого расширения не поддерживается! Повторите попытку!", cancellationToken: ct);
@@ -640,7 +624,6 @@ async Task OnMessageReceived(ITelegramBotClient bot, Message msg, CancellationTo
 
                 teacher.LastInlineMessageId = messageToDelete.Id;
 
-                // в данном случае в NoteName передается строка содержащая айди документа, его название и описание (разделены переносом строки)
                 teacher.NoteName = $"{msg.Document.FileId}\n{msg.Document.FileName}\n{msg.Caption}";
 
                 db.SaveChanges();
@@ -713,7 +696,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         return;
 
                     case "btn_teacher":
-                        // кнопку могли нажать повторно или в старом сообщении /start - второй раз пользователя не создаем
                         if (db.Users.Any(u => u.TgId == query.From.Id))
                         {
                             await bot.DeleteMessage(chatId, messageId, ct);
@@ -810,8 +792,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         }
                         return;
 
-                    // кнопки студента
-
                     case "rejectGroup":
                         var student = db.Students.FirstOrDefault(u => u.TgId == query.From.Id);
                         if (student == null) throw new InvalidOperationException($"Студент с TgId {query.From.Id} не найден в БД.");
@@ -851,8 +831,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         await bot.SendMessage(chatId, "Все готово!🎉 Ожидайте проверку данных. Результат проверки будет отправлен в этот чат.", cancellationToken: ct);
                         
                         return;
-
-                    // кнопки учителя
 
                     case "confirmSpecialty":
                         var teacher = db.Teachers.FirstOrDefault(s => s.TgId == query.From.Id); if (teacher == null) throw new InvalidOperationException($"Преподаватель с TgId {query.From.Id} не найден в БД.");
@@ -995,7 +973,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                                          $"ФИО: {waitingTeachers[index].Surname} {waitingTeachers[index].Name} {waitingTeachers[index].Patronymic}\n" +
                                          $"Кафедра/специальность: {waitingTeachers[index].Specialty ?? "не указана"}";
 
-                        // Для преподавателей используем текстовое сообщение (фото в модели может отсутствовать)
                         await bot.EditMessageText(
                             chatId: chatId,
                             messageId: messageId,
@@ -1031,7 +1008,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
         case "verify":
             switch(command)
             {
-                //отладка сделана
                 case "page":
 
                     int page = Convert.ToInt32(parts[2]);
@@ -1081,12 +1057,10 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
 
                     return;
 
-                //отладка сделана
                 case "confirm":
                     long id = long.Parse(parts[2]);
                     using (ApplicationContext db = new ApplicationContext(options))
                     {
-                        // студент мог удалить профиль, пока заявка была открыта у админа - тогда просто показываем следующую
                         var user = db.Students.FirstOrDefault(u => u.TgId == id);
                         if (user != null)
                         {
@@ -1094,7 +1068,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                             user.State = "verified";
                             db.SaveChanges();
 
-                            // студент мог заблокировать бота
                             try { await bot.SendMessage(user.TgId, "Поздравляем! Ваша учетная запись верифицирована!",cancellationToken: ct); }
                             catch (Exception) { }
                         }
@@ -1110,7 +1083,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         {
                             await bot.DeleteMessage(chatId, messageId, cancellationToken: ct);
 
-                            // 2. Отправляем чистое текстовое сообщение
                             var messageToDelete = await bot.SendMessage(
                                 chatId: chatId,
                                 text: "Все заявки рассмотрены!",
@@ -1132,13 +1104,11 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                             {
                                 new[]
                                 {
-                                    // Исправлено: указан .UserId вместо целого объекта
                                     InlineKeyboardButton.WithCallbackData("✅ Принять", $"verify:confirm:{waitingUsers[index].TgId}"),
                                     InlineKeyboardButton.WithCallbackData("❌ Отклонить", $"verify:reject:{waitingUsers[index].TgId}")
                                 },
                                 new[]
                                 {
-                                    // Добавлено двоеточие для консистентного парсинга через Split(':')
                                     InlineKeyboardButton.WithCallbackData("⬅️", $"verify:page:{prevIndex}"),
                                     InlineKeyboardButton.WithCallbackData($"{index + 1}/{waitingUsers.Count}", "empty"),
                                     InlineKeyboardButton.WithCallbackData("➡️", $"verify:page:{nextIndex}"),
@@ -1185,7 +1155,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         {
                             await bot.DeleteMessage(chatId, messageId, cancellationToken: ct);
 
-                            // 2. Отправляем чистое текстовое сообщение
                             var messageToDelete = await bot.SendMessage(
                                 chatId: chatId,
                                 text: "Все заявки рассмотрены!",
@@ -1275,7 +1244,7 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                             {
                                 await bot.EditMessageText(chatId, messageId, caption, replyMarkup: singleButtonMarkup, cancellationToken: ct);
                             }
-                            catch (Exception) { } // телеграм кидает ошибку, если текст не изменился (листание на крайней странице)
+                            catch (Exception) { }
                         }
                     }
                     return;
@@ -1285,7 +1254,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                     long teacherId = long.Parse(parts[2]);
                     using (ApplicationContext db = new ApplicationContext(options))
                     {
-                        // преподаватель мог удалить профиль, пока заявка была открыта у админа
                         var teacher = db.Teachers.FirstOrDefault(u => u.TgId == teacherId);
 
                         if (teacher != null)
@@ -1301,7 +1269,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                             }
                             db.SaveChanges();
 
-                            // преподаватель мог заблокировать бота
                             try { await bot.SendMessage(teacher.TgId, command == "confirm" ? "Поздравляем! Ваша учетная запись верифицирована!" : "Упс... Ваша заявка на верификацию отклонена! Проверьте свои данные через /profile → ✏️ Редактировать информацию и отправьте заявку заново.", cancellationToken: ct); }
                             catch (Exception) { }
                         }
@@ -1521,7 +1488,7 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         if (teacher == null) return;
 
                         try { await bot.DeleteMessage(chatId, teacher.LastInlineMessageId); }
-                        catch (Exception) { } // старое меню могло быть уже удалено или старше 48 часов - телеграм не даст его удалить
+                        catch (Exception) { }
 
                         if (teacherNotes.Count == 0)
                         {
@@ -1535,7 +1502,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
 
                         foreach (var note in teacherNotes)
                         {
-                            // Создаем строку с одной кнопкой
                             var row = new[]
                             {
                                  InlineKeyboardButton.WithCallbackData
@@ -1562,7 +1528,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         db.SaveChanges();
                     }
 
-
                     return;
 
                 case "editNoteNum":
@@ -1573,7 +1538,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         var teacher = db.Teachers.FirstOrDefault(t=>t.TgId == query.From.Id);
 
                         var note = db.teacherNotes.FirstOrDefault(n => n.Id == num);
-
 
                         if (teacher == null || note == null) return;
 
@@ -1645,7 +1609,7 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         }
 
                          try { await bot.DeleteMessage(chatId, teacher.LastInlineMessageId, cancellationToken: ct); }
-                         catch (Exception) { } // старое меню могло быть уже удалено или старше 48 часов - телеграм не даст его удалить
+                         catch (Exception) { }
                          
                          var inlineKeyboard = new InlineKeyboardMarkup(new[]
                          {
@@ -1717,16 +1681,13 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         note.CreatedTime = DateTime.Now;
                         teacher.NoteName = null;
 
-                        // Удаляем все старые объявления этой заметки напрямую из базы
                         db.studyAnnouncements.Where(a => a.TeacherDocumentId == noteNum).ExecuteDelete();
 
-
                         try { await bot.DeleteMessage(chatId, teacher.LastInlineMessageId, cancellationToken: ct); }
-                        catch (Exception) { } // старое меню могло быть уже удалено или старше 48 часов - телеграм не даст его удалить
+                        catch (Exception) { }
 
                         teacher.LastInlineMessageId = 0;
                         
-
                         db.SaveChanges();
 
                         var editMessage = await bot.SendMessage(chatId, "Изменения применяются...", cancellationToken: ct);
@@ -1751,10 +1712,8 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         int noteId = int.Parse(parts[2]);
                         var note = db.teacherNotes.FirstOrDefault(n => n.Id == noteId);
                         var teacher = db.Teachers.FirstOrDefault(t => t.TgId == query.From.Id);
-                        // NoteName == null, если кнопку нажали повторно и файл уже применен
                         if (note == null || teacher == null || teacher.NoteName == null) return;
 
-                        // формат: айди файла \n название файла \n подпись. Подпись идет последней, т.к. в ней самой могут быть переносы строк
                         string[] infoAboutNote = teacher.NoteName.Split('\n', 3);
                         note.FileId = infoAboutNote[0];
                         note.FileName = infoAboutNote[1];
@@ -1763,10 +1722,9 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         teacher.NoteName = null;
 
                         try { await bot.DeleteMessage(chatId, teacher.LastInlineMessageId, cancellationToken: ct); }
-                        catch (Exception) { } // старое меню могло быть уже удалено или старше 48 часов - телеграм не даст его удалить
+                        catch (Exception) { }
                         teacher.LastInlineMessageId = 0;
 
-                        // Удаляем все старые объявления этой заметки напрямую одним SQL-запросом
                         db.studyAnnouncements.Where(a => a.TeacherDocumentId == noteId).ExecuteDelete();
 
                         db.SaveChanges();
@@ -1829,10 +1787,8 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                     {
                         var teacher = db.Teachers.FirstOrDefault(t=>t.TgId == query.From.Id);
                         if (teacher == null) return;
-                        // удаляем то сообщение, на котором нажали кнопку - LastInlineMessageId мог устареть
                         try { await bot.DeleteMessage(chatId, messageId, ct); }
                         catch (Exception) { }
-                        //db.SaveChanges();
                         return;
                     }
 
@@ -1860,7 +1816,7 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         });
 
                         try { await bot.DeleteMessage(chatId, teacher.LastInlineMessageId, cancellationToken: ct); }
-                        catch (Exception) { } // старое меню могло быть уже удалено или старше 48 часов - телеграм не даст его удалить
+                        catch (Exception) { }
 
                         var messageToDelete = await bot.SendMessage(chatId, "Для навигации по меню воспользуйтесь кнопками", replyMarkup: inlineKeyboard, cancellationToken: ct);
 
@@ -2036,7 +1992,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                             return;
                         }
 
-                        // заметки связаны с учителем только по TgId, поэтому удаляем их вручную (объявления удалятся каскадно)
                         if (user is TeacherDB)
                         {
                             var notes = db.teacherNotes.Where(n => n.TeacherTgId == user.TgId).ToList();
@@ -2110,7 +2065,6 @@ async Task OnCallbackReceived(ITelegramBotClient bot, CallbackQuery query, Cance
                         var user = db.Users.FirstOrDefault(u => u.TgId == query.From.Id);
                         if (user == null) return;
 
-                        // дальше пользователь проходит те же шаги, что и при регистрации (ФИО -> группа/специальность -> студ. билет)
                         user.Isverified = false;
                         user.State = "WaitingForFullName";
                         user.LastInlineMessageId = 0;

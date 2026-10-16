@@ -32,8 +32,8 @@ namespace dialogue_without_borders_tg_bot
 
     public class TeacherDB : UserDB
     {
-        public string? Specialty { get; set; }  // предмет/специальность
-        public string? Department { get; set; } // кафедра
+        public string? Specialty { get; set; }
+        public string? Department { get; set; }
        public string? NoteName { get; set; }
     }
 
@@ -44,13 +44,13 @@ namespace dialogue_without_borders_tg_bot
     public class TeacherNote
     {
         public int Id { get; set; }
-        public long TeacherTgId { get; set; } // какой учитель отправил
-        public string Discipline { get; set; } = null!; // по какому предмету файл
-        public string? FileId { get; set; } // айди файла на серверах тг
-        public string? FileName { get; set; } // название файла
-        public string? Text { get; set; } // поле для текстовых заметок
-        public string NoteName { get; set; } = null!; //название заметки
-        public DateTime CreatedTime { get; set; } // когда был загружен файл
+        public long TeacherTgId { get; set; }
+        public string Discipline { get; set; } = null!;
+        public string? FileId { get; set; }
+        public string? FileName { get; set; }
+        public string? Text { get; set; }
+        public string NoteName { get; set; } = null!;
+        public DateTime CreatedTime { get; set; }
         public List<StudyAnnouncement> Announcements { get; set; } = new();
     }
 
@@ -58,15 +58,14 @@ namespace dialogue_without_borders_tg_bot
     {
         public int Id { get; set; }
 
-        // Внешний ключ на документ
         [ForeignKey(nameof(Document))]
         public int TeacherDocumentId { get; set; }
         public TeacherNote Document { get; set; } = null!;
 
-        public string TargetGroup { get; set; } = "all"; // Номер группы или "all"
-        public int TargetCourse {  get; set; } // номер курса
-        public string Topic { get; set; } = null!;       // Тематика: "Пересдача", "Дедлайн", "Вопросы к экзамену"
-        public string Content { get; set; } = null!;     // Четкий факт/информация
-        public string? EventDate { get; set; }          // Дата события (если нейросеть её нашла, напр. "20.09")
+        public string TargetGroup { get; set; } = "all";
+        public int TargetCourse {  get; set; }
+        public string Topic { get; set; } = null!;
+        public string Content { get; set; } = null!;
+        public string? EventDate { get; set; }
     }
 }
