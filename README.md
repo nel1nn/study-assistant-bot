@@ -99,8 +99,8 @@ dialogue_without_borders_tg_bot/
 ### 2. Установка
 
 ```bash
-git clone https://github.com/nel1nn/dialogue_without_borders_tg_bot.git
-cd dialogue_without_borders_tg_bot/dialogue_without_borders_tg_bot
+git clone https://github.com/nel1nn/study-assistant-bot.git
+cd study-assistant-bot/dialogue_without_borders_tg_bot
 ```
 
 Скопируйте `config.example.json` в `config.json` и подставьте свои значения:
